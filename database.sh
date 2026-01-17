@@ -7,7 +7,25 @@ export PS3="Database>"
 RESET="\033[0m"
 RED="\033[31m"
 GREEN="\033[32m"
-YELLOW="\033[34m"
+YELLOW="\033[33m"
+BLUE="\033[34m"
+
+# Success Status
+SUCCESS=1
+
+# Error Status
+EMPTY_INPUT=-1
+INVALID_INPUT=-2
+UNDERSCORE_ONLY_INPUT=-3
+START_WITH_NUM_INPUT=-5
+EXISTS=-4
+NOT_FOUND=-5
+
+# Codes
+EMPTY_CODE=101
+INVALID_CHARS_CODE=102
+UNDERSCORE_ONLY_CODE=103
+START_WITH_NUM_CODE=104
 
 # Enable extended pattern matching for advanced data validation
 shopt -s extglob
@@ -15,69 +33,75 @@ shopt -s extglob
 # create DBMS
 if [[ ! -d ~/.DBMS ]]; then
 	echo "Create .DBMS Directory .............."
-	mkdir ~/.DBMS
 	sleep 1
+	mkdir ~/.DBMS
 fi
 
 # validate the input of database name
-read_input() {
-	read -r -p "Enter Name of DS: " input
-	echo "$input"
+input_validation() {
+	local input=$1
+
+	case "$input" in
+	"")
+		echo "$EMPTY_INPUT"
+		;;
+	[0-9]*)
+		echo "$START_WITH_NUM_INPUT"
+		;;
+	"_")
+		echo "$UNDERSCORE_ONLY_INPUT"
+		;;
+	*([a-zA-Z0-9_]))
+		echo "$SUCCESS"
+		;;
+	*)
+		echo "$INVALID_INPUT"
+		;;
+	esac
 }
 
 ################### DATABASES ###################
 
 # create database
 create_db() {
-	input=$(read_input)
+	local db_name=$1
+	local validation_res
 
-	# Check if empty
-	if [[ -z "$input" ]]; then
-		echo -e "${RED}Error 106: Database name cannot be empty.${RESET}"
-		return 1
-	fi
+	validation_res=$(input_validation "$db_name")
 
-	case $input in
-	[0-9]*)
-		echo -e "${RED}Error 101: Name of Directory Start with numbers.${RESET}"
-		;;
-	_)
-		echo -e "${RED}Error 102: Name of Directory Can't be_.${RESET}"
-		;;
-	+([a-zA-Z0-9_]))
-		if [[ -d ~/.DBMS/$input ]]; then
-			echo -e "${RED}Error 103: Name of DB is already exists.${RESET}"
+	if [[ "$validation_res" == "$SUCCESS" ]]; then
+		if [[ -d ~/.DBMS/"$db_name" ]]; then
+			echo "$EXISTS"
 		else
-			echo -e "${GREEN}Creating DB... ${RESET}"
-			mkdir ~/.DBMS/"$input"
-			sleep 1
-
-			echo -e "${GREEN}${input}Created!!!${RESET}"
+			mkdir -p ~/.DBMS/"$db_name"
+			echo "$SUCCESS"
 		fi
-		;;
-	*)
-		echo -e "${RED}Error 104: Name of Directory contains Special Characters.${RESET}" "$input"
-		;;
-	esac
+	else
+		echo "$validation_res"
+	fi
 }
 
 # List databases
 list_db() {
-	if [[ -z "$(ls -A ~/.DBMS)" ]]; then
-		echo "No databases found."
-		return
+	local -n arr=$1
+	local -n status=$2
+
+	if [[ ! -d ~/.DBMS ]] || [[ -z "$(ls -A ~/.DBMS 2>/dev/null)" ]]; then
+		status="$NOT_FOUND"
+	else
+		arr=()
+		for db in ~/.DBMS/*/; do
+			if [[ -d "$db" ]]; then
+				arr+=("$(basename "$db")")
+			fi
+		done
+		status="$SUCCESS"
 	fi
-	echo -e "${YELLOW}List Of Databases:${RESET}"
-	for db in ~/.DBMS/*/; do
-		if [[ -d "$db" ]]; then
-			basename "$db"
-		fi
-	done
 }
 
 # connect to database
 connect_db() {
-	input=$(read_input)
+	input=$(read_db_input)
 
 	# Check if empty
 	if [[ -z "$input" ]]; then
@@ -98,7 +122,7 @@ connect_db() {
 
 # drop database
 drop_db() {
-	input=$(read_input)
+	input=$(read_db_input)
 
 	# Check if empty
 	if [[ -z "$input" ]]; then
@@ -119,7 +143,12 @@ drop_db() {
 ################### TABLES ###################
 
 create_table() {
-	:
+	tname=$(read_table_input)
+	if [[ -f $tname ]]; then
+		echo -e "${RED} Error 201: table ${tname} is already exists! ${RESET}"
+		return
+	fi
+
 }
 
 list_table() {
@@ -134,7 +163,7 @@ insert_into_table() {
 	:
 }
 
-update_from_table(){
+update_from_table() {
 	:
 }
 
@@ -147,15 +176,15 @@ delete_from_table() {
 }
 
 # put the menu of database options
-menu=("create_db" "list_db" "connect_db" "drop_db" "exit")
+menu=("create database" "list database" "connect database" "drop database" "exit")
 select _ in "${menu[@]}"; do
 
 	case $REPLY in
 	1 | "create database")
-		create_db
+		# create_db
 		;;
 	2 | "list database")
-		list_db
+		# list_db
 		;;
 	3 | "connect database")
 		connect_db
