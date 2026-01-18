@@ -17,16 +17,17 @@ SUCCESS=1
 EMPTY_INPUT=-1
 INVALID_INPUT=-2
 UNDERSCORE_ONLY_INPUT=-3
-START_WITH_NUM_INPUT=-5
-EXISTS=-4
-NOT_FOUND=-5
+START_WITH_NUM_INPUT=-4
+EXISTS=-5
+NOT_FOUND=-6
 
 # Codes
 EMPTY_CODE=101
 INVALID_CHARS_CODE=102
 UNDERSCORE_ONLY_CODE=103
 START_WITH_NUM_CODE=104
-
+EXISTS_CODE=105
+NOT_FOUND_CODE=106
 # Enable extended pattern matching for advanced data validation
 shopt -s extglob
 
@@ -60,6 +61,30 @@ input_validation() {
 	esac
 }
 
+# Print Errors
+print_error() {
+	local code=$1
+	case $code in
+	"$EMPTY_INPUT")
+		echo -e "${RED}Error ${EMPTY_CODE}: Input cannot be empty.${RESET}"
+		;;
+	"$START_WITH_NUM_INPUT")
+		echo -e "${RED}Error ${START_WITH_NUM_CODE}: Cannot start with a number.${RESET}"
+		;;
+	"$UNDERSCORE_ONLY_INPUT")
+		echo -e "${RED}Error ${UNDERSCORE_ONLY_CODE}: Cannot be underscore only.${RESET}"
+		;;
+	"$INVALID_INPUT")
+		echo -e "${RED}Error ${INVALID_CHARS_CODE}: Invalid characters detected.${RESET}"
+		;;
+	"$EXISTS")
+		echo -e "${RED}Error ${EXISTS_CODE}: Database already exists.${RESET}"
+		;;
+	"$NOT_FOUND")
+		echo -e "${RED}Error ${NOT_FOUND_CODE}: Database not found.${RESET}"
+		;;
+	esac
+}
 ################### DATABASES ###################
 
 # create database
@@ -122,22 +147,24 @@ connect_db() {
 
 # drop database
 drop_db() {
-	input=$(read_db_input)
 
-	# Check if empty
-	if [[ -z "$input" ]]; then
-		echo -e "${RED}Error 106: Database name cannot be empty.${RESET}"
-		return 1
-	fi
+	local db_name=$1
+    local validation_res
 
-	if [[ -d ~/.DBMS/$input ]]; then
-		echo -e "${GREEN}Deleting DB... ${RESET}"
-		rm -r ~/.DBMS/"$input"
-		sleep 1
-		echo -e "${GREEN}$input Deleted!!!${RESET}"
-	else
-		echo -e "${RED}Error 105: DB doesn't exist.${RESET}"
-	fi
+    validation_res=$(input_validation "$db_name")
+
+    if [[ "$validation_res" != "$SUCCESS" ]]; then
+        echo "$validation_res"
+        return
+    fi
+
+    if [[ -d ~/.DBMS/"$db_name" ]]; then
+        rm -r ~/.DBMS/"$db_name"
+        echo "$SUCCESS"
+    else
+        echo "$NOT_FOUND"
+    fi
+
 }
 
 ################### TABLES ###################
@@ -181,17 +208,51 @@ select _ in "${menu[@]}"; do
 
 	case $REPLY in
 	1 | "create database")
-		# create_db
+		read -r -p "Enter Database Name: " dbNameInput
+
+		result=$(create_db "$dbNameInput")
+
+		if [[ $result == "$SUCCESS" ]]; then
+			echo -e "${GREEN}Database created successfully.${RESET}"
+		else
+			print_error "$result"
+		fi
 		;;
+
 	2 | "list database")
-		# list_db
+
+		list_db dbs status
+
+		if [[ $status == "$SUCCESS" ]]; then
+			echo -e "${BLUE}Databases:${RESET}"
+			for db in "${dbs[@]}"; do
+				echo "- $db"
+			done
+		else
+			print_error "$status"
+		fi
 		;;
 	3 | "connect database")
-		connect_db
+		# connect_db
 		;;
 	4 | "drop database")
-		drop_db
-		;;
+		read -r -p "Enter Database Name to drop: " dbNameInput
+        
+        read -r -p "Are you sure you want to delete '$dbNameInput'? (y/n): " confirm
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+        
+            result=$(drop_db "$dbNameInput")
+            
+            if [[ "$result" == "$SUCCESS" ]]; then
+                echo -e "${GREEN}Database Dropped Successfully.${RESET}"
+            else
+                print_error "$result"
+            fi
+            
+        else
+            echo -e "${YELLOW}Operation Cancelled.${RESET}"
+        fi
+        ;;
 	5 | "exit")
 		echo -e "${GREEN}Exiting...!${RESET}"
 		break
