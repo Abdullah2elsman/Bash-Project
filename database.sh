@@ -20,6 +20,9 @@ UNDERSCORE_ONLY_INPUT=-3
 START_WITH_NUM_INPUT=-4
 EXISTS=-5
 NOT_FOUND=-6
+INVALID_TYPE_INT=-7
+INVALID_TYPE_STRING=-8
+PK_EXISTS=-9
 
 # Codes
 EMPTY_CODE=101
@@ -28,7 +31,9 @@ UNDERSCORE_ONLY_CODE=103
 START_WITH_NUM_CODE=104
 EXISTS_CODE=105
 NOT_FOUND_CODE=106
-INVALID_NUM_CODE=207 #Will change
+INVALID_INT__TYPE_CODE=202
+INVALID_STRING__TYPE_CODE=203
+PK_EXISTS_CODE=204
 # Enable extended pattern matching for advanced data validation
 shopt -s extglob
 
@@ -83,6 +88,15 @@ print_error() {
 		;;
 	"$NOT_FOUND")
 		echo -e "${RED}Error ${NOT_FOUND_CODE}: Database not found.${RESET}"
+		;;
+	"$INVALID_TYPE_INT")
+		echo -e "${RED}Error ${INVALID_INT__TYPE_CODE}: Value must be integer.${RESET}"
+		;;
+	"$INVALID_TYPE_STRING")
+		echo -e "${RED}Error ${INVALID_STRING__TYPE_CODE}: Invalid string (Empty or contains ':').${RESET}"
+		;;
+	"$PK_EXISTS")
+		echo -e "${RED}Error ${PK_EXISTS_CODE}: Primary Key already exists!${RESET}"
 		;;
 	esac
 }
@@ -220,7 +234,7 @@ create_table() {
 # 2-
 ################################# List Table #################################
 
-list_table() {
+list_tables() {
 	:
 }
 
@@ -234,8 +248,81 @@ drop_table() {
 # 4-
 ################################# Insert Into Table #################################
 
+# ================= TABLE HELPERS =================
+
+get_table_columns() {
+	local tableName=$1
+	awk 'NR==1 {print $0}' ".$tableName.meta"
+}
+
+get_table_types() {
+	local tableName=$1
+	awk 'NR==2 {print $0}' ".$tableName.meta"
+}
+
+get_table_pk() {
+	local tableName=$1
+	awk 'NR==3 {print $0}' ".$tableName.meta"
+}
+
+check_value_exists() {
+	local tableName=$1
+	local colIndex=$2
+	local value=$3
+
+	if awk -F: -v col="$colIndex" -v val="$value" '$col == val {exit 0} END {exit 1}' "$tableName"; then
+		echo "$EXISTS"
+	else
+		echo "$NOT_FOUND"
+	fi
+}
+
+validate_insert() {
+	local val=$1
+	local type=$2
+	local tableName=$3
+	local colIndex=$4
+	local isPK=$5
+
+	if [[ "$type" == "int" ]]; then
+		if [[ ! "$val" =~ ^[0-9]+$ ]]; then
+			echo "$INVALID_TYPE_INT"
+			return
+		fi
+	elif [[ "$type" == "string" ]]; then
+		if [[ -z "$val" || "$val" == *":"* ]]; then
+			echo "$INVALID_TYPE_STRING"
+			return
+		fi
+	fi
+
+	if [[ "$isPK" == "true" ]]; then
+		local exists
+		exists=$(check_value_exists "$tableName" "$colIndex" "$val")
+
+		if [[ "$exists" == "$EXISTS" ]]; then
+			echo "$PK_EXISTS"
+			return
+		fi
+	fi
+
+	echo "$SUCCESS"
+}
 insert_into_table() {
-	:
+	local tableName=$1
+	local rowData=$2
+
+	if [[ ! -f "$tableName" ]]; then
+		echo "$NOT_FOUND"
+	else
+		if echo "$rowData" >>"$tableName"; then
+			echo "$SUCCESS"
+		else
+			# ممكن نعمل كود خطأ جديد للكتابة، بس حالياً نرجع ده
+			echo "$INVALID_INPUT"
+		fi
+	fi
+
 }
 
 # 5-
@@ -271,12 +358,46 @@ tables_menu() {
 		1 | "create table")
 			read -r -p "Enter Table Name: " tName
 
-			result=$(create_table "$tName")
+			read -r -p "Enter Columns (space separated): " colsInput
+			read -r -p "Enter Types (space separated): " typesInput
+			read -r -p "Enter Primary Key Name: " pkInput
+
+			if [[ -z "$colsInput" || -z "$typesInput" || -z "$pkInput" ]]; then
+				print_error "$EMPTY_INPUT"
+				continue
+			else
+
+				colsMeta=$(echo "$colsInput" | tr -s ' ' ':')
+				typesMeta=$(echo "$typesInput" | tr -s ' ' ':')
+
+				IFS=':' read -r -a colsArr <<<"$colsMeta"
+				IFS=':' read -r -a typesArr <<<"$typesMeta"
+
+				if [[ ${#colsArr[@]} -ne ${#typesArr[@]} ]]; then
+					echo -e "${RED}Error: Column count (${#colsArr[@]}) does not match Type count (${#typesArr[@]}).${RESET}"
+					continue
+				fi
+
+				pkExists="false"
+				for col in "${colsArr[@]}"; do
+					if [[ "$col" == "$pkInput" ]]; then
+						pkExists="true"
+						break
+					fi
+				done
+
+				if [[ "$pkExists" == "false" ]]; then
+					echo -e "${RED}Error: Primary Key '$pkInput' must be one of the columns.${RESET}"
+					continue
+				fi
+			fi
+
+			result=$(create_table "$tName" "$colsMeta" "$typesMeta" "$pkInput")
 
 			if [[ $result == "$SUCCESS" ]]; then
 				echo -e "${GREEN}Table created successfully.${RESET}"
 			elif [[ $result == "$EXISTS" ]]; then
-				echo -e "${RED}Table already exists.${RESET}"
+				echo -e "${RED}Error ${EXISTS}: Table already exists.${RESET}"
 			else
 				print_error "$result"
 			fi
@@ -288,7 +409,65 @@ tables_menu() {
 			drop_table
 			;;
 		4 | "insert")
-			insert_into_table
+			read -r -p "Enter Table Name: " tName
+
+			if [[ ! -f "$tName" ]]; then
+				print_error "$NOT_FOUND"
+			else
+				rawCols=$(get_table_columns "$tName")
+				rawTypes=$(get_table_types "$tName")
+				pkName=$(get_table_pk "$tName")
+
+				IFS=':' read -r -a cols <<<"$rawCols"
+				IFS=':' read -r -a types <<<"$rawTypes"
+
+				rowData=""
+				colCount=${#cols[@]}
+
+				for ((i = 0; i < colCount; i++)); do
+					colName=${cols[$i]}
+					colType=${types[$i]}
+
+					isPK="false"
+					if [[ "$colName" == "$pkName" ]]; then
+						isPK="true"
+					fi
+
+					echo -e "${BLUE}Enter value for '$colName' ($colType):${RESET}"
+
+					valid=false
+
+					while ! $valid; do
+						read -r -p "> " inputVal
+
+						# --- استدعاء المفتش (Validation Function) ---
+						valResult=$(validate_insert "$inputVal" "$colType" "$tName" $((i + 1)) "$isPK")
+
+						if [[ "$valResult" == "$SUCCESS" ]]; then
+							valid=true
+						else
+							print_error "$valResult"
+						fi
+					done
+
+					# تجميع السطر (Concatenation)
+					if [[ $i -eq 0 ]]; then
+						rowData="$inputVal"
+					else
+						rowData="$rowData:$inputVal"
+					fi
+				done
+
+				# 4. الحفظ النهائي (Final Persistence)
+				result=$(insert_into_table "$tName" "$rowData")
+
+				if [[ "$result" == "$SUCCESS" ]]; then
+					echo -e "${GREEN}Row inserted successfully.${RESET}"
+					echo "---------------------------------"
+				else
+					echo -e "${RED}Error saving data to file.${RESET}"
+				fi
+			fi
 			;;
 		5 | "select")
 			select_from_table
