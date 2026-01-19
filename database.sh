@@ -234,15 +234,51 @@ create_table() {
 # 2-
 ################################# List Table #################################
 
-list_tables() {
-	:
+get_tables_list() {
+	local -n tablesArr=$1
+	local -n opStatus=$2
+
+	local files=(*)
+
+	if [[ "${files[0]}" == "*" ]]; then
+		opStatus="$NOT_FOUND"
+		return
+	fi
+
+	tablesArr=()
+	for f in "${files[@]}"; do
+		if [[ -f "$f" ]]; then
+			tablesArr+=("$f")
+		fi
+	done
+
+	if [[ ${#tablesArr[@]} -gt 0 ]]; then
+		opStatus="$SUCCESS"
+	else
+		opStatus="$NOT_FOUND"
+	fi
 }
 
 # 3-
 ################################# Drop Table #################################
 
+validate_table_existence() {
+    local tableName=$1
+
+    if [[ -f "$tableName" ]]; then
+        echo "$SUCCESS"
+    else
+        echo "$NOT_FOUND"
+    fi
+}
+
 drop_table() {
-	:
+	local tableName=$1
+
+    rm "$tableName"
+    rm ".$tableName.meta" 2>/dev/null
+    
+    echo "$SUCCESS"
 }
 
 # 4-
@@ -353,8 +389,8 @@ tables_menu() {
 
 	PS3="DB($db_name)> " # Change the propmt
 
-	select choice in "Create Table" "List Tables" "Drop Table" "Insert" "Select" "Update" "Delete" "Back to Main Menu"; do
-		case $choice in
+	select _ in "Create Table" "List Tables" "Drop Table" "Insert" "Select" "Update" "Delete" "Back to Main Menu"; do
+		case $REPLY in
 		1 | "create table")
 			read -r -p "Enter Table Name: " tName
 
@@ -403,11 +439,41 @@ tables_menu() {
 			fi
 			;;
 		2 | "list tables")
-			list_table
+			declare -a tList
+			declare tStatus
+
+			get_tables_list tList tStatus
+
+			if [[ "$tStatus" == "$SUCCESS" ]]; then
+				echo -e "${BLUE}=== Existing Tables ===${RESET}"
+				for table in "${tList[@]}"; do
+					echo -e "-> $table"
+				done
+				echo -e "${BLUE}=======================${RESET}"
+			else
+				echo -e "${YELLOW}No tables found in database '$db_name'.${RESET}"
+			fi
 			;;
 		3 | "drop table")
-			drop_table
-			;;
+			read -r -p "Enter Table Name to Drop: " tName
+
+            checkResult=$(validate_table_existence "$tName")
+
+            if [[ "$checkResult" == "$SUCCESS" ]]; then
+                
+                read -r -p "Are you sure you want to delete table '$tName'? (y/n): " confirm
+                
+                if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+                    drop_table "$tName"
+                    echo -e "${GREEN}Table '$tName' dropped successfully.${RESET}"
+                else
+                    echo -e "${YELLOW}Operation Cancelled.${RESET}"
+                fi
+
+            else
+                print_error "$checkResult"
+            fi
+            ;;
 		4 | "insert")
 			read -r -p "Enter Table Name: " tName
 
@@ -478,7 +544,7 @@ tables_menu() {
 		7 | "delete")
 			delete_from_table
 			;;
-		0 | "back to tain menu")
+		8 | "back to tain menu")
 			export PS3="Database> "
 			break
 			;;
